@@ -1,0 +1,171 @@
+services:
+  proxy:
+    image: caddy:2-alpine
+    container_name: floww-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./logs:/var/log/caddy
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - DOMAIN={{DOMAIN}}
+    networks:
+      - floww-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    image: ghcr.io/usefloww/floww-backend:latest
+    container_name: floww-backend
+    environment:
+      - PUBLIC_API_URL={{PROTOCOL}}://{{DOMAIN}}
+      - DASHBOARD_URL={{PROTOCOL}}://{{DOMAIN}}
+      - WEBSOCKET_URL={{WS_PROTOCOL}}://{{DOMAIN}}/ws
+      - REGISTRY_URL=http://registry:5000
+      - REGISTRY_AUTH_USER=${DOCKER_REGISTRY_USER}
+      - REGISTRY_AUTH_PASSWORD=${DOCKER_REGISTRY_PASSWORD}
+      - REGISTRY_REPOSITORY_NAME=floww-runtime
+      - REGISTRY_RANDOM_SECRET=${REGISTRY_RANDOM_SECRET}
+      - RUNTIME_TYPE=docker
+      - AUTH_TYPE={{AUTH_TYPE}}
+      - DATABASE_USER=admin
+      - DATABASE_PASSWORD=${DB_PASSWORD}
+      - DATABASE_HOST=db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=postgres
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - CENTRIFUGO_HOST=centrifugo
+      - CENTRIFUGO_PORT=8000
+      - CENTRIFUGO_API_KEY=${CENTRIFUGO_API_KEY}
+      - CENTRIFUGO_API_ENDPOINT=http://centrifugo:8000/api
+      - CENTRIFUGO_JWT_SECRET=${CENTRIFUGO_JWT_SECRET}
+      - CENTRIFUGO_PUBLIC_URL={{WS_PROTOCOL}}://{{DOMAIN}}/ws
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY}
+      - WORKFLOW_JWT_SECRET=${WORKFLOW_JWT_SECRET}
+      - RUN_MIGRATIONS_ON_STARTUP=true
+      - IS_CLOUD=false
+      - SINGLE_ORG_MODE=true
+      - SINGLE_ORG_NAME={{ORG_NAME}}
+      - SINGLE_ORG_DISPLAY_NAME={{ORG_DISPLAY_NAME}}
+      - SINGLE_ORG_DEFAULT_ROLE=owner
+      - SINGLE_ORG_ALLOW_PERSONAL_NAMESPACES=false
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.docker/config.json:/root/.docker/config.json
+    user: root
+    networks:
+      - floww-network
+    depends_on:
+      db:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import requests; r=requests.get('http://localhost:8000/api/health', timeout=5); r.raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  dashboard:
+    image: ghcr.io/usefloww/floww-dashboard:latest
+    container_name: floww-dashboard
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - NEXT_PUBLIC_WS_URL=/ws
+    networks:
+      - floww-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: floww-db
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - floww-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d postgres && psql -U admin -d postgres -c 'SELECT 1' > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: always
+
+  centrifugo:
+    image: centrifugo/centrifugo:v5
+    container_name: floww-centrifugo
+    command: centrifugo
+    environment:
+      - CENTRIFUGO_API_KEY=${CENTRIFUGO_API_KEY}
+      - CENTRIFUGO_ADMIN=false
+      - CENTRIFUGO_PROXY_CONNECT_ENDPOINT=http://backend:8000/centrifugo/connect
+      - CENTRIFUGO_PROXY_CONNECT_TIMEOUT=5s
+      - CENTRIFUGO_PROXY_SUBSCRIBE_ENDPOINT=http://backend:8000/centrifugo/subscribe
+      - CENTRIFUGO_PROXY_SUBSCRIBE_TIMEOUT=5s
+      - CENTRIFUGO_ALLOWED_ORIGINS={{PROTOCOL}}://{{DOMAIN}}
+      - CENTRIFUGO_ALLOW_ORIGIN={{PROTOCOL}}://{{DOMAIN}}
+    networks:
+      - floww-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    restart: always
+
+  registry:
+    image: registry:2.8.3
+    container_name: floww-registry
+    environment:
+      - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/var/lib/registry
+    volumes:
+      - registry-data:/var/lib/registry
+    networks:
+      - floww-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/v2/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: always
+
+networks:
+  floww-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  registry-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,53 @@
+{
+    # Automatic HTTPS via Let's Encrypt
+    email {{ADMIN_EMAIL}}
+}
+
+{{DOMAIN}} {
+    # API routes
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+    handle /admin/* {
+        reverse_proxy backend:8000
+    }
+    handle /auth/* {
+        reverse_proxy backend:8000
+    }
+    handle /v2/* {
+        reverse_proxy backend:8000
+    }
+    
+    # WebSocket connection
+    handle /ws {
+        reverse_proxy centrifugo:8000
+    }
+    
+    # Dashboard (default/catch-all)
+    handle {
+        reverse_proxy dashboard:3000
+    }
+    
+    # Enable compression
+    encode gzip zstd
+    
+    # Security headers
+    header {
+        # Enable HSTS
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        # Prevent MIME sniffing
+        X-Content-Type-Options "nosniff"
+        # XSS Protection
+        X-XSS-Protection "1; mode=block"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    
+    # Access logs
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}
