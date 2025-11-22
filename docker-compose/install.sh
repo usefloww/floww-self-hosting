@@ -16,7 +16,7 @@ INSTALL_DIR="$PWD/floww"
 #   - Default (remote): https://raw.githubusercontent.com/usefloww/floww/main/install/templates
 #   - Local files: file:///path/to/local/templates
 #   - Local server: http://localhost:8000/templates
-TEMPLATES_URL="${TEMPLATES_URL:-https://raw.githubusercontent.com/usefloww/floww/main/install/templates}"
+TEMPLATES_URL="${TEMPLATES_URL:-https://raw.githubusercontent.com/usefloww/floww-self-hosting/refs/heads/main/docker-compose/templates}"
 
 # Helper functions
 log_info() {
